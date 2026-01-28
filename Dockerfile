@@ -1,4 +1,4 @@
-FROM nvidia/cuda:11.1.1-cudnn8-devel-ubuntu20.04 as builder
+FROM nvidia/cuda:11.1.1-cudnn8-devel-ubuntu20.04 AS builder
 
 RUN ln -fs /usr/share/zoneinfo/Europe/Oslo /etc/localtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -37,7 +37,7 @@ RUN python3.8 -m pip install --no-cache-dir --upgrade \
     docutils==0.17.1 \
     ipython==7.27.0 \
     ninja==1.10.2 \
-    pandas==1.3.3 \
+    pandas \
     pip==21.2.4 \
     poetry==1.1.8 \
     pylint==2.10.2 \
@@ -48,7 +48,7 @@ RUN python3.8 -m pip install --no-cache-dir --upgrade \
     wheel==0.37.0
 
 ENV CU_VERSION=cu111
-ENV TORCH_CUDA_ARCH_LIST_VER="6.0;7.0;7.5;8.0;8.6"
+ENV TORCH_CUDA_ARCH_LIST_VER="6.0;7.0;7.5;8.0;8.6; 8.9; 9.0; 10.0; 10.3; 11.0"
 
 RUN python3.8 -m pip install --no-cache-dir \
     torch==1.9.0+${CU_VERSION} \
@@ -257,7 +257,7 @@ RUN python3.8 -m pip install --no-cache-dir \
 
 RUN mkdir -p /home/datascience
 
-COPY . /home/nibio/mutable-outside-world
+# COPY . /home/nibio/mutable-outside-world
 WORKDIR /home/nibio/mutable-outside-world
-
-ENTRYPOINT ["bash", "run_oracle_pipeline.sh"]
+ # "run_oracle_pipeline.sh"
+ENTRYPOINT ["bash"]
