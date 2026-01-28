@@ -257,7 +257,7 @@ RUN python3.8 -m pip install --no-cache-dir \
 
 RUN mkdir -p /home/datascience
 
-# COPY . /home/nibio/mutable-outside-world
+COPY . /home/nibio/mutable-outside-world
 WORKDIR /home/nibio/mutable-outside-world
  # "run_oracle_pipeline.sh"
-ENTRYPOINT ["bash"]
+ENTRYPOINT ["bash", "run_oracle_pipeline.sh"]
