@@ -149,7 +149,7 @@ RUN TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST_VER} FORCE_CUDA=1 python3.8 -m p
     omegaconf==2.0.6 \
     open3d==0.12.0 \
     packaging==21.0 \
-    pandas==1.1.5 \
+    pandas \
     pandocfilters==1.5.0 \
     parso==0.8.2 \
     pexpect==4.8.0 \

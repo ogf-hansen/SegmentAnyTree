@@ -83,6 +83,7 @@ for file in "$FINAL_DEST_DIR"/*; do
     filename=$(basename "$file")
 
     # Use parameter expansion to remove the initial number and underscore
+    # todo change here 
     new_name=$(echo "$filename" | sed 's/^[0-9]*_//')
 
     # Construct the new file path

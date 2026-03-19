@@ -115,9 +115,9 @@ files=($(find "$ORACLE_IN_DATA_FOLDER" -maxdepth 1 -type f))
 IFS="$OLD_IFS"
 
 # Process files in chunks of 10
-for ((i=0; i<${#files[@]}; i+=10)); do
-    # Copy up to 10 files to TMP_IN_DATA_FOLDER
-    cp "${files[@]:i:10}" "$TMP_IN_DATA_FOLDER/"
+for ((i=0; i<${#files[@]}; i+=1)); do
+    # Copy up to 1 files to TMP_IN_DATA_FOLDER 
+    cp "${files[@]:i:1}" "$TMP_IN_DATA_FOLDER/"
 
     # Run the inference script on these files
     bash run_inference.sh "$TMP_IN_DATA_FOLDER" "$TMP_OUT_DATA_FOLDER"
