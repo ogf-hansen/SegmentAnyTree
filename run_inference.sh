@@ -64,36 +64,16 @@ python3 eval.py --config-name "$DEST_DIR/eval.yaml"
 
 echo "Done with inference using the config file: $DEST_DIR/eval.yaml"
 
-# Rename the output files result_0.ply , result_1.ply, ... to the original file names but with the prefix "inference_"
-python3 "$SCRIPT_DIR/nibio_inference/rename_result_files_instance.py" "$DEST_DIR/eval.yaml" "$DEST_DIR"
-
-# Rename segmentation files
-python3 "$SCRIPT_DIR/nibio_inference/rename_result_files_segmentation.py" "$DEST_DIR/eval.yaml" "$DEST_DIR"
-
 FINAL_DEST_DIR="$DEST_DIR/final_results"
 
-# Run merge script
-python3 "$SCRIPT_DIR/nibio_inference/merge_pt_ss_is_in_folders_parallel.py" -i "$DEST_DIR/utm2local" -s "$DEST_DIR" -o "$FINAL_DEST_DIR" -v
+# Merge predictions (.npz) with original point clouds into .las files
+# This replaces the old rename + PLY-based merge pipeline
+python3 "$SCRIPT_DIR/nibio_inference/merge_predictions.py" \
+    -e "$DEST_DIR/eval.yaml" \
+    -p "$DEST_DIR" \
+    -o "$FINAL_DEST_DIR" \
+    -v
 
-# remove numbers in the beginning of the file names
-
-# Loop through all files in the specified folder
-for file in "$FINAL_DEST_DIR"/*; do
-    # Extract just the filename from the path
-    filename=$(basename "$file")
-
-    # Use parameter expansion to remove the initial number and underscore
-    # todo change here 
-    new_name=$(echo "$filename" | sed 's/^[0-9]*_//')
-
-    # Construct the new file path
-    new_file_path="$FINAL_DEST_DIR/$new_name"
-
-    # Rename the file
-    mv -n "$file" "$new_file_path"
-done
-
-# Avoid using ls to count files. This way, you can handle filenames with newlines or other problematic characters.
 num_files=$(find "$FINAL_DEST_DIR" -maxdepth 1 -type f | wc -l)
 
 echo "Number of files in the final results directory: $num_files"

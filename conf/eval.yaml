@@ -29,6 +29,7 @@ tracker_options: # Extra options for the tracker
   full_res: True
   make_submission: True
   ply_output: "maciej_eval.ply"
+  debug_viz: False # Set to True to write debug visualization PLY files (viz/, viz_for_test_*/ dirs)
 
 hydra:
   run:

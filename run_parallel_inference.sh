@@ -152,14 +152,7 @@ for ((k=0; k<N_GPU_WORKERS; k++)); do
     (
         echo "[Group $k] Starting inference on $FILE_COUNT files..."
         python3 eval.py --config-name "$GROUP_OUTPUT_DIR/eval.yaml"
-
-        echo "[Group $k] Inference complete. Renaming result files..."
-        python3 "$SCRIPT_DIR/nibio_inference/rename_result_files_instance.py" \
-            "$GROUP_OUTPUT_DIR/eval.yaml" "$GROUP_OUTPUT_DIR"
-        python3 "$SCRIPT_DIR/nibio_inference/rename_result_files_segmentation.py" \
-            "$GROUP_OUTPUT_DIR/eval.yaml" "$GROUP_OUTPUT_DIR"
-
-        echo "[Group $k] Done."
+        echo "[Group $k] Inference complete."
     ) &
     PIDS+=($!)
 
@@ -193,29 +186,19 @@ echo "All groups completed successfully."
 echo ""
 echo "=== Phase 4: Collecting results and merging ==="
 
-# Collect all renamed segmentation files from group dirs into DEST_DIR
-for ((k=0; k<N_GPU_WORKERS; k++)); do
-    GROUP_OUTPUT_DIR="$DEST_DIR/group_${k}"
-    for f in "$GROUP_OUTPUT_DIR"/instance_segmentation_*.ply; do
-        [ -f "$f" ] && mv "$f" "$DEST_DIR/"
-    done
-    for f in "$GROUP_OUTPUT_DIR"/semantic_segmentation_*.ply; do
-        [ -f "$f" ] && mv "$f" "$DEST_DIR/"
-    done
-done
-
 FINAL_DEST_DIR="$DEST_DIR/final_results"
 
-# Run parallel merge
-python3 "$SCRIPT_DIR/nibio_inference/merge_pt_ss_is_in_folders_parallel.py" \
-    -i "$DEST_DIR/utm2local" -s "$DEST_DIR" -o "$FINAL_DEST_DIR" -v
-
-# Remove number prefixes from final file names (e.g., "0_filename.las" -> "filename.las")
-for file in "$FINAL_DEST_DIR"/*; do
-    filename=$(basename "$file")
-    new_name=$(echo "$filename" | sed 's/^[0-9]*_//')
-    new_file_path="$FINAL_DEST_DIR/$new_name"
-    mv -n "$file" "$new_file_path"
+# Merge predictions from each group using their group-specific eval.yaml
+for ((k=0; k<N_GPU_WORKERS; k++)); do
+    GROUP_OUTPUT_DIR="$DEST_DIR/group_${k}"
+    if [ -f "$GROUP_OUTPUT_DIR/eval.yaml" ]; then
+        echo "Merging predictions from group $k..."
+        python3 "$SCRIPT_DIR/nibio_inference/merge_predictions.py" \
+            -e "$GROUP_OUTPUT_DIR/eval.yaml" \
+            -p "$GROUP_OUTPUT_DIR" \
+            -o "$FINAL_DEST_DIR" \
+            -v
+    fi
 done
 
 num_files=$(find "$FINAL_DEST_DIR" -maxdepth 1 -type f | wc -l)
