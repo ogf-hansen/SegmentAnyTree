@@ -21,7 +21,10 @@ def pandas_to_ply(csv, csv_file_provided=False, output_file_path=None):
  
     # Create a structured numpy array with dtype based on the columns of the DataFrame
     dtypes = [(col, 'f4') for col in df.columns]
-    data = np.array(list(map(tuple, df.to_records(index=False))), dtype=dtypes)
+    data = np.rec.fromarrays(
+        [df[col].to_numpy(dtype='f4') for col in df.columns],
+        dtype=dtypes
+    )
 
     # Create a new PlyElement
     vertex = PlyElement.describe(data, 'vertex')
