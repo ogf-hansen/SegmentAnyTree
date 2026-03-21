@@ -23,7 +23,7 @@ class MergePtSsIs(object):
                  semantic_segmentation, 
                  instance_segmentation, 
                  output_file_path,
-                 verbose=False
+                 verbose=True
                  ):
         
         self.point_cloud = point_cloud

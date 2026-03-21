@@ -179,3 +179,5 @@ check_list.info
 *.pdf
 *.png
 *.csv
+
+model_file/

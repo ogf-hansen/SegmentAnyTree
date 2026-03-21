@@ -21,7 +21,7 @@ There is a quick start for all who want to quickly process the data.
 
 ```
 mkdir -p $HOME/segmentanytree/input
-mkdir -p $HOME/segmentanytree/output
+mkdir -p $HOME/segmentanytree/outpute
 
 docker pull maciekwielgosz/segment-any-tree:latest
 
