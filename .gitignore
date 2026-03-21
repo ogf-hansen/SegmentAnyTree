@@ -179,4 +179,6 @@ check_list.info
 *.png
 *.csv
 
+model_file/*.pt
 model_file/
+model_file/PointGroup-PAPER.pt
