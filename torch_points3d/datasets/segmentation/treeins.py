@@ -19,6 +19,8 @@ import pandas as pd
 import pickle
 import gdown
 import shutil
+import hashlib
+
 # PLY reader
 from torch_points3d.modules.KPConv.plyutils import read_ply
 from torch_points3d.datasets.samplers import BalancedRandomSampler
@@ -420,7 +422,8 @@ class TreeinsOriginalFused(InMemoryDataset):
         This method is used during evaluation/running eval.py.
         @Treeins: Method is extended so that we can evaluate on more than one test file."""
 
-        self.processed_path = osp.join(self.processed_dir,'processed_test.pt')
+        group_id = hashlib.md5('|'.join(sorted(test_area)).encode()).hexdigest()[:8]
+        self.processed_path = osp.join(self.processed_dir, f'processed_test_{group_id}.pt')
 
         #if not os.path.exists(self.processed_dir):
         #    os.mkdir(self.processed_dir)

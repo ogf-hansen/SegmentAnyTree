@@ -73,7 +73,7 @@ python3 "$SCRIPT_DIR/nibio_inference/rename_result_files_segmentation.py" "$DEST
 FINAL_DEST_DIR="$DEST_DIR/final_results"
 
 # Run merge script
-python3 "$SCRIPT_DIR/nibio_inference/merge_pt_ss_is_in_folders.py" -i "$DEST_DIR/utm2local" -s "$DEST_DIR" -o "$FINAL_DEST_DIR" -v
+python3 "$SCRIPT_DIR/nibio_inference/merge_pt_ss_is_in_folders_parallel.py" -i "$DEST_DIR/utm2local" -s "$DEST_DIR" -o "$FINAL_DEST_DIR" -v
 
 # remove numbers in the beginning of the file names
 
