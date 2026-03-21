@@ -247,6 +247,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
     zip \
     vim \
+<<<<<<< HEAD
+=======
+    nvtop \
+>>>>>>> f36400e6e0a63fbb377267d468778bbc36c409e6
     && rm -rf /var/lib/apt/lists/*
 
 RUN python3.8 -m pip install --no-cache-dir \

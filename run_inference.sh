@@ -64,6 +64,7 @@ python3 eval.py --config-name "$DEST_DIR/eval.yaml"
 
 echo "Done with inference using the config file: $DEST_DIR/eval.yaml"
 
+<<<<<<< HEAD
 # Rename the output files result_0.ply , result_1.ply, ... to the original file names but with the prefix "inference_"
 python3 "$SCRIPT_DIR/nibio_inference/rename_result_files_instance.py" "$DEST_DIR/eval.yaml" "$DEST_DIR"
 
@@ -92,8 +93,18 @@ for file in "$FINAL_DEST_DIR"/*; do
     # Rename the file
     mv -n "$file" "$new_file_path"
 done
+=======
+FINAL_DEST_DIR="$DEST_DIR/final_results"
 
-# Avoid using ls to count files. This way, you can handle filenames with newlines or other problematic characters.
+# Merge predictions (.npz) with original point clouds into .las files
+# This replaces the old rename + PLY-based merge pipeline
+python3 "$SCRIPT_DIR/nibio_inference/merge_predictions.py" \
+    -e "$DEST_DIR/eval.yaml" \
+    -p "$DEST_DIR" \
+    -o "$FINAL_DEST_DIR" \
+    -v
+>>>>>>> f36400e6e0a63fbb377267d468778bbc36c409e6
+
 num_files=$(find "$FINAL_DEST_DIR" -maxdepth 1 -type f | wc -l)
 
 echo "Number of files in the final results directory: $num_files"

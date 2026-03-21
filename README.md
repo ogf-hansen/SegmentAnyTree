@@ -21,7 +21,11 @@ There is a quick start for all who want to quickly process the data.
 
 ```
 mkdir -p $HOME/segmentanytree/input
+<<<<<<< HEAD
 mkdir -p $HOME/segmentanytree/outpute
+=======
+mkdir -p $HOME/segmentanytree/output
+>>>>>>> f36400e6e0a63fbb377267d468778bbc36c409e6
 
 docker pull maciekwielgosz/segment-any-tree:latest
 
