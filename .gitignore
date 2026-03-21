@@ -181,4 +181,5 @@ check_list.info
 
 model_file/*.pt
 model_file/
-model_file/PointGroup-PAPER.pt
+
+.claude/
