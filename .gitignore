@@ -180,3 +180,5 @@ check_list.info
 *.csv
 
 model_file/
+
+.claude/
