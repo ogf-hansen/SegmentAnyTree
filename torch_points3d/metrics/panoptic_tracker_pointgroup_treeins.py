@@ -296,6 +296,7 @@ class PanopticTracker(SegmentationTracker):
             self._dump_visuals_fortest(outputs, originids, valid_c_idx)
 
         self.block_count += 1  # With each call of track(...), we go on cylinder or sphere block further
+        self.spheres_count += 1  # track which sphere/cylinder within the current file
 
         # @Treeins: tells us if we have reached the last cylinder or sphere block belonging to the data file represented by self.cloud_count
         if self.spheres_count == self._dataset.test_data_num_spheres[self.cloud_count]:
@@ -347,7 +348,6 @@ class PanopticTracker(SegmentationTracker):
                           ['x', 'y', 'z',
                            'sem_prob_1', 'sem_prob_2',  # @Treeins: two semantic segmentation classes: non-tree and tree
                            'pre_sem_label', 'mask_score', 'gt_sem_label'])
-        self.spheres_count += 1
 
     def get_cur_ins_pre_label(self, clusters, cluster_scores, predicted_semlabels):
         cur_ins_pre_label = -1 * np.ones_like(predicted_semlabels)
@@ -581,9 +581,15 @@ class PanopticTracker(SegmentationTracker):
                 test_area_i = test_area_i.to("cpu")
                 c = ConfusionMatrix(self._num_classes)
                 has_prediction = test_area_i.prediction_count > 0
+                if not has_prediction.any():
+                    print(f"WARNING: No predictions for test area {i}, skipping")
+                    continue
                 gt = test_area_i.y[has_prediction].numpy()
                 pred = torch.argmax(test_area_i.votes[has_prediction], 1).numpy()
                 gt_effect = gt >= 0
+                if gt_effect.sum() == 0:
+                    print(f"WARNING: No valid ground truth for test area {i}, skipping")
+                    continue
                 c.count_predicted_batch(gt[gt_effect], pred[gt_effect])
                 self._vote_miou = c.get_average_intersection_union() * 100
 
