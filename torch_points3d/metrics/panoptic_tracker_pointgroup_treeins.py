@@ -700,12 +700,11 @@ class PanopticTracker(SegmentationTracker):
                         "Instance_Offset_results_forEval.ply",
                     )'''
 
-                    # Save predictions as .npz (replaces result_{i}.ply and semantic_result_{i}.ply)
+                    # Save predictions as .npz (instance labels only; semantic filtering already applied)
                     print("saving predictions npz")
                     np.savez(
                         "predictions_{}.npz".format(i),
                         pos=test_area_i.pos.cpu().numpy(),
-                        semantic_labels=semantic_labels,
                         instance_labels=full_ins_pred.numpy(),
                     )
                     print("saving predictions npz done")

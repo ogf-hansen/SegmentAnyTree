@@ -9,9 +9,9 @@ the expanded tiles, this script:
 
 Usage:
     python nibio_inference/stitch_tiles.py \
-        --original_dir /path/to/original_tiles/ \
         --segmented_dir /path/to/segmented_tiles/ \
         --output_dir /path/to/stitched_output/ \
+        --neighbors_json /path/to/neighbors.json \
         --overlap 5.0 \
         --iou_threshold 0.3 \
         -v
@@ -153,7 +153,6 @@ def match_instances_between_tiles(
 
 
 def stitch_tiles(
-    original_dir,
     segmented_dir,
     output_dir,
     neighbors_json,
@@ -172,30 +171,31 @@ def stitch_tiles(
         print(f"Loaded neighbor index: {len(neighbors_index)} tiles")
 
     # ---- 2. Discover tiles ------------------------------------------------
-    original_files = {}
-    for f in os.listdir(original_dir):
-        if f.lower().endswith(('.las', '.laz')):
-            original_files[os.path.splitext(f)[0]] = os.path.join(original_dir, f)
-
     segmented_files = {}
     for f in os.listdir(segmented_dir):
         if f.lower().endswith(('.las', '.laz')):
             segmented_files[os.path.splitext(f)[0]] = os.path.join(segmented_dir, f)
 
     common = sorted(
-        set(original_files.keys()) & set(segmented_files.keys()) & set(neighbors_index.keys())
+        set(segmented_files.keys()) & set(neighbors_index.keys())
     )
     if not common:
-        print("ERROR: No matching tile names across original, segmented, and neighbors.json.")
+        print("ERROR: No matching tile names across segmented dir and neighbors.json.")
         sys.exit(1)
 
     if verbose:
         print(f"Found {len(common)} matching tiles")
 
-    # ---- 3. Read original headers for core bounds -------------------------
+    # ---- 3. Read original core bounds from neighbors.json -----------------
     core_bounds = {}
-    for name in tqdm(common, desc="Reading original headers", disable=not verbose):
-        core_bounds[name] = get_tile_bounds(original_files[name])
+    for name in common:
+        entry = neighbors_index[name]
+        bounds = entry.get("original_bounds")
+        if bounds is None:
+            print(f"ERROR: No original_bounds for tile '{name}' in neighbors.json. "
+                  "Re-run retile_with_overlap.py to regenerate.")
+            sys.exit(1)
+        core_bounds[name] = tuple(bounds)  # (xmin, xmax, ymin, ymax)
 
     # ---- 4. Load segmented tiles, separate core/overlap -------------------
     tile_data = {}
@@ -237,7 +237,7 @@ def stitch_tiles(
         overlap_z = da['z'][overlap_mask_a]
         overlap_inst = da['instances'][overlap_mask_a]
 
-        for name_b in neighbors_index.get(name_a, []):
+        for name_b in neighbors_index.get(name_a, {}).get("neighbors", []):
             if name_b not in tile_data:
                 continue
 
@@ -368,14 +368,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description="Stitch segmented tiles: resolve instance IDs across tile boundaries."
     )
-    parser.add_argument('--original_dir', type=str, required=True,
-                        help="Directory of original tiles (pre-overlap, for core bounds)")
     parser.add_argument('--segmented_dir', type=str, required=True,
-                        help="Directory of segmented tiles (post-inference, with PredInstance/PredSemantic)")
+                        help="Directory of segmented tiles (post-inference, with PredInstance)")
     parser.add_argument('--output_dir', type=str, required=True,
                         help="Output directory for stitched tiles")
     parser.add_argument('--neighbors_json', type=str, required=True,
-                        help="Path to neighbors.json from retile_with_overlap.py")
+                        help="Path to neighbors.json from retile_with_overlap.py (contains original bounds)")
     parser.add_argument('--overlap', type=float, default=5.0,
                         help="Overlap distance used during retiling (default: 5.0)")
     parser.add_argument('--iou_threshold', type=float, default=0.3,
@@ -389,7 +387,6 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     stitch_tiles(
-        args.original_dir,
         args.segmented_dir,
         args.output_dir,
         args.neighbors_json,

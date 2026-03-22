@@ -119,9 +119,13 @@ def main(input_dir, output_dir, overlap=5.0, n_jobs=-1, s3_uri=None, verbose=Fal
         tasks.append((path, neighbors, output_path))
         # Store by basename for portability
         tile_name = os.path.splitext(os.path.basename(path))[0]
-        neighbors_index[tile_name] = [
-            os.path.splitext(os.path.basename(nb))[0] for nb in neighbors
-        ]
+        bounds = all_bounds[path]
+        neighbors_index[tile_name] = {
+            "neighbors": [
+                os.path.splitext(os.path.basename(nb))[0] for nb in neighbors
+            ],
+            "original_bounds": list(bounds),  # [xmin, xmax, ymin, ymax]
+        }
 
     # Write neighbor index JSON
     neighbors_json_path = os.path.join(output_dir, "neighbors.json")

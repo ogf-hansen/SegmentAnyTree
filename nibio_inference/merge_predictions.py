@@ -23,10 +23,9 @@ def merge_single(fold_path, predictions_path, output_path, verbose=False):
     if verbose:
         print(f"Merging: {os.path.basename(fold_path)}")
 
-    # Load predictions (subsampled positions + labels)
+    # Load predictions (subsampled positions + instance labels)
     preds = np.load(predictions_path)
     pred_pos = preds['pos']
-    semantic_labels = preds['semantic_labels']
     instance_labels = preds['instance_labels']
 
     # Load original point cloud from utm2local
@@ -38,7 +37,6 @@ def merge_single(fold_path, predictions_path, output_path, verbose=False):
     distances, indices = tree.query(original_df[['x', 'y', 'z']].values, k=1)
 
     # Assign predictions
-    original_df['PredSemantic'] = semantic_labels[indices]
     original_df['PredInstance'] = instance_labels[indices].astype(np.float64)
 
     # If distance > 1m, mark as no instance (same threshold as tracker)
