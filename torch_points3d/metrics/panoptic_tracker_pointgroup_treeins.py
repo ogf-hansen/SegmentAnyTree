@@ -595,16 +595,7 @@ class PanopticTracker(SegmentationTracker):
 
                 if ply_output:
                     has_prediction = test_area_i.prediction_count > 0
-                    # semantic prediction with color for subsampled cloud
-                    self._dataset.to_ply(
-                        test_area_i.pos[has_prediction].cpu(),
-                        torch.argmax(test_area_i.votes[has_prediction], 1).cpu().numpy(),
-                        # ply_output,
-                        ply_output + ("_{}.ply".format(i)),
-                        # @Treeins: save semantic segmentation prediction of current data file
-                    )
 
-                    # self._test_area = self._test_area.to("cpu")
                     full_pred = knn_interpolate(
                         test_area_i.votes[has_prediction], test_area_i.pos[has_prediction], test_area_i.pos, k=1,
                     )
