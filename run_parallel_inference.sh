@@ -206,21 +206,34 @@ launch_group() {
     fc=$(find "$group_input" -maxdepth 1 -name "*.ply" -type l 2>/dev/null | wc -l)
 
     local group_log="$group_output/worker.log"
+    local final_dir="$DEST_DIR/final_results"
     (
         log "[Group $k] Starting inference on $fc files on GPU $gpu at $(date +%H:%M:%S)..."
         CUDA_VISIBLE_DEVICES=$gpu python3 eval.py --config-name "$group_output/eval.yaml" \
             > "$group_log" 2>&1
         log "[Group $k] Inference complete at $(date +%H:%M:%S)."
-        # Clean cached .pt files in background — don't block slot from being freed
-        if [ -d "$CACHE_DIR" ]; then
-            (
+
+        # Launch merge + cache cleanup in background — don't block slot from being freed
+        (
+            # Merge predictions to final .las files (CPU only, no GPU needed)
+            if [ -f "$group_output/eval.yaml" ]; then
+                log "[Group $k] Starting merge at $(date +%H:%M:%S)..."
+                python3 "$SCRIPT_DIR/nibio_inference/merge_predictions.py" \
+                    -e "$group_output/eval.yaml" \
+                    -p "$group_output" \
+                    -o "$final_dir" \
+                    -v >> "$group_log" 2>&1
+                log "[Group $k] Merge complete at $(date +%H:%M:%S)."
+            fi
+            # Clean cached .pt files
+            if [ -d "$CACHE_DIR" ]; then
                 for ply in "$group_input"/*.ply; do
                     [ -e "$ply" ] || continue
                     base=$(basename "$ply" .ply)
                     rm -f "$CACHE_DIR/processed_${base}.pt" "$CACHE_DIR/raw_area_${base}.pt"
                 done
-            ) &
-        fi
+            fi
+        ) &
     ) &
     SLOT_PIDS[$slot]=$!
     SLOT_GPU[$slot]=$gpu
@@ -290,17 +303,42 @@ log "=== Phase 4: Collecting results and merging ==="
 PHASE_START=$SECONDS
 
 FINAL_DEST_DIR="$DEST_DIR/final_results"
+mkdir -p "$FINAL_DEST_DIR"
 
-# Merge predictions from each group using their group-specific eval.yaml
+# Merging happens inline after each group's inference (launched in background).
+# Wait for any remaining merge processes to finish.
+log "Waiting for background merge processes to complete..."
+wait
+
+# Check for any groups that may have failed merging and retry
 for ((k=0; k<N_GPU_WORKERS; k++)); do
     GROUP_OUTPUT_DIR="$DEST_DIR/group_${k}"
     if [ -f "$GROUP_OUTPUT_DIR/eval.yaml" ]; then
-        log "Merging predictions from group $k..."
-        python3 "$SCRIPT_DIR/nibio_inference/merge_predictions.py" \
-            -e "$GROUP_OUTPUT_DIR/eval.yaml" \
-            -p "$GROUP_OUTPUT_DIR" \
-            -o "$FINAL_DEST_DIR" \
-            -v
+        # Check if this group produced any .las output
+        EVAL_YAML="$GROUP_OUTPUT_DIR/eval.yaml"
+        EXPECTED=$(python3 -c "
+import yaml, os
+with open('$EVAL_YAML') as f:
+    fold = yaml.safe_load(f).get('data',{}).get('fold',[])
+for p in fold:
+    b = os.path.splitext(os.path.basename(p))[0]
+    if b.endswith('_out'): b = b[:-4]
+    print(b)
+" 2>/dev/null)
+        MISSING=0
+        for base in $EXPECTED; do
+            if [ ! -f "$FINAL_DEST_DIR/${base}.las" ]; then
+                MISSING=$((MISSING + 1))
+            fi
+        done
+        if [ "$MISSING" -gt 0 ]; then
+            log "Group $k: $MISSING files missing, re-running merge..."
+            python3 "$SCRIPT_DIR/nibio_inference/merge_predictions.py" \
+                -e "$GROUP_OUTPUT_DIR/eval.yaml" \
+                -p "$GROUP_OUTPUT_DIR" \
+                -o "$FINAL_DEST_DIR" \
+                -v
+        fi
     fi
 done
 
