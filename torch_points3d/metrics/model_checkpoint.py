@@ -76,9 +76,10 @@ class Checkpoint:
         else:
             chkp_name = os.path.basename(checkpoint_file)
             if resume:
-                shutil.copyfile(
-                    checkpoint_file, chkp_name
-                )  # Copy checkpoint to new run directory to make sure we don't override
+                if not os.path.exists(chkp_name):
+                    os.symlink(
+                        os.path.abspath(checkpoint_file), chkp_name
+                    )  # Symlink to checkpoint to avoid duplicating large model weights
             ckp = Checkpoint(chkp_name)
             #ckp.run_config = run_config
             log.info("Loading checkpoint from {}".format(checkpoint_file))

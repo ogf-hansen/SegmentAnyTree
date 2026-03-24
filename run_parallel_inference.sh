@@ -5,9 +5,9 @@ set -e
 # Splits tiles into groups and runs multiple eval.py processes concurrently across GPUs.
 # Usage: run_parallel_inference.sh <input_dir> <output_dir> [clean_output_dir]
 # Environment variables:
-#   N_GPU_WORKERS  - number of concurrent eval.py processes (default: 2)
-#   N_GPUS         - number of GPUs available; workers are distributed round-robin (default: 1)
-#   STAGGER_DELAY  - seconds between process launches (default: 30)
+#   N_GPU_WORKERS  - total number of groups to split data into (default: 2)
+#   N_GPUS         - number of GPUs available (default: 1)
+#   WORKERS_PER_GPU - max concurrent workers per GPU (default: 2)
 
 SOURCE_DIR="$1"
 DEST_DIR="$2"
@@ -15,7 +15,8 @@ CLEAN_OUTPUT_DIR="$3"
 
 N_GPU_WORKERS="${N_GPU_WORKERS:-2}"
 N_GPUS="${N_GPUS:-1}"
-STAGGER_DELAY="${STAGGER_DELAY:-30}"
+WORKERS_PER_GPU="${WORKERS_PER_GPU:-2}"
+MAX_CONCURRENT=$((N_GPUS * WORKERS_PER_GPU))
 
 # Set default values if not provided
 : "${SOURCE_DIR:=/home/nibio/mutable-outside-world/data_for_test}"
@@ -69,9 +70,9 @@ echo "=== Parallel Inference ==="
 echo "Started at: $(date)"
 echo "Input directory: $SOURCE_DIR"
 echo "Output directory: $DEST_DIR"
-echo "GPU workers: $N_GPU_WORKERS"
+echo "Total groups: $N_GPU_WORKERS"
 echo "GPUs available: $N_GPUS"
-echo "Stagger delay: ${STAGGER_DELAY}s"
+echo "Workers per GPU: $WORKERS_PER_GPU (max concurrent: $MAX_CONCURRENT)"
 echo "Log file: $LOG_FILE"
 
 # ============================================================
@@ -126,6 +127,7 @@ FILES_PER_GROUP=$(( (TOTAL_FILES + N_GPU_WORKERS - 1) / N_GPU_WORKERS ))
 for ((k=0; k<N_GPU_WORKERS; k++)); do
     GROUP_INPUT_DIR="$DEST_DIR/group_${k}_input"
     GROUP_OUTPUT_DIR="$DEST_DIR/group_${k}"
+    rm -rf "$GROUP_INPUT_DIR" "$GROUP_OUTPUT_DIR"
     mkdir -p "$GROUP_INPUT_DIR"
     mkdir -p "$GROUP_OUTPUT_DIR"
 
@@ -165,60 +167,100 @@ done
 log_phase_time "Phase 2 (Splitting)" $PHASE_START
 
 # ============================================================
-# PHASE 3: Parallel GPU Inference
+# PHASE 3: Parallel GPU Inference (worker pool: WORKERS_PER_GPU concurrent per GPU)
 # ============================================================
 echo ""
-echo "=== Phase 3: Running $N_GPU_WORKERS parallel inference processes across $N_GPUS GPU(s) ==="
+echo "=== Phase 3: Running $N_GPU_WORKERS groups across $N_GPUS GPU(s) ($WORKERS_PER_GPU workers/GPU, $MAX_CONCURRENT concurrent) ==="
 PHASE_START=$SECONDS
 
-PIDS=()
-WORKER_STARTS=()
+# Collect valid groups into an array
+VALID_GROUPS=()
 for ((k=0; k<N_GPU_WORKERS; k++)); do
     GROUP_OUTPUT_DIR="$DEST_DIR/group_${k}"
     GROUP_INPUT_DIR="$DEST_DIR/group_${k}_input"
-
-    # Skip groups with no files
     if [ ! -f "$GROUP_OUTPUT_DIR/eval.yaml" ]; then
         continue
     fi
-
-    # Check if group has any files in its fold
     FILE_COUNT=$(find "$GROUP_INPUT_DIR" -maxdepth 1 -name "*.ply" -type l 2>/dev/null | wc -l)
     if [ "$FILE_COUNT" -eq 0 ]; then
         continue
     fi
-
-    GPU_ID=$((k % N_GPUS))
-    WORKER_STARTS+=($SECONDS)
-
-    (
-        echo "[Group $k] Starting inference on $FILE_COUNT files on GPU $GPU_ID at $(date +%H:%M:%S)..."
-        CUDA_VISIBLE_DEVICES=$GPU_ID python3 eval.py --config-name "$GROUP_OUTPUT_DIR/eval.yaml"
-        echo "[Group $k] Inference complete at $(date +%H:%M:%S)."
-    ) &
-    PIDS+=($!)
-
-    # Stagger launches to avoid simultaneous GPU memory peaks
-    if [ "$k" -lt $((N_GPU_WORKERS - 1)) ]; then
-        echo "Waiting ${STAGGER_DELAY}s before launching next group..."
-        sleep "$STAGGER_DELAY"
-    fi
+    VALID_GROUPS+=($k)
 done
 
-# Wait for all groups to finish
-echo "Waiting for all groups to finish..."
+echo "Valid groups: ${#VALID_GROUPS[@]}"
+
+# Cache dir for cleanup (derived from checkpoint's dataroot config)
+CACHE_DIR="/home/datascience/tmp_out_folder/utm2local/treeinsfused/processed_0.2_test"
+
+# Helper: launch a group on a given GPU, store PID in slot
+launch_group() {
+    local k=$1
+    local gpu=$2
+    local slot=$3
+    local group_output="$DEST_DIR/group_${k}"
+    local group_input="$DEST_DIR/group_${k}_input"
+    local fc
+    fc=$(find "$group_input" -maxdepth 1 -name "*.ply" -type l 2>/dev/null | wc -l)
+
+    (
+        echo "[Group $k] Starting inference on $fc files on GPU $gpu at $(date +%H:%M:%S)..."
+        CUDA_VISIBLE_DEVICES=$gpu python3 eval.py --config-name "$group_output/eval.yaml"
+        echo "[Group $k] Inference complete at $(date +%H:%M:%S). Cleaning cached .pt files..."
+        if [ -d "$CACHE_DIR" ]; then
+            for ply in "$group_input"/*.ply; do
+                [ -e "$ply" ] || continue
+                base=$(basename "$ply" .ply)
+                rm -f "$CACHE_DIR/processed_${base}.pt" "$CACHE_DIR/raw_area_${base}.pt"
+            done
+        fi
+    ) &
+    SLOT_PIDS[$slot]=$!
+    SLOT_GPU[$slot]=$gpu
+    echo "Launched group $k on GPU $gpu slot $slot (PID $!)"
+}
+
+# Slot-based worker pool: each slot = one concurrent worker
+# Slots 0..MAX_CONCURRENT-1, mapped round-robin to GPUs
+declare -A SLOT_PIDS  # slot -> PID
+declare -A SLOT_GPU   # slot -> GPU id
 FAILED=0
-for i in "${!PIDS[@]}"; do
-    pid="${PIDS[$i]}"
-    if wait "$pid"; then
-        elapsed=$(( SECONDS - WORKER_STARTS[i] ))
-        mins=$(( elapsed / 60 ))
-        secs=$(( elapsed % 60 ))
-        echo "[TIMING] Worker $i (PID $pid): ${mins}m ${secs}s"
-    else
-        echo "ERROR: Process $pid failed"
-        FAILED=$((FAILED + 1))
-    fi
+NEXT_GROUP=0
+
+# Launch initial batch: fill all slots
+for ((slot=0; slot<MAX_CONCURRENT && NEXT_GROUP<${#VALID_GROUPS[@]}; slot++)); do
+    gpu=$((slot % N_GPUS))
+    k=${VALID_GROUPS[$NEXT_GROUP]}
+    launch_group "$k" "$gpu" "$slot"
+    NEXT_GROUP=$((NEXT_GROUP + 1))
+done
+
+# Poll every 5s — when a slot frees up, launch the next group on the same GPU
+while [ $NEXT_GROUP -lt ${#VALID_GROUPS[@]} ] || [ ${#SLOT_PIDS[@]} -gt 0 ]; do
+    sleep 5
+    for slot in "${!SLOT_PIDS[@]}"; do
+        pid=${SLOT_PIDS[$slot]}
+        if ! kill -0 "$pid" 2>/dev/null; then
+            wait "$pid"
+            EXIT_CODE=$?
+            gpu=${SLOT_GPU[$slot]}
+            if [ "$EXIT_CODE" -ne 0 ]; then
+                echo "ERROR: PID $pid on GPU $gpu (slot $slot) failed (exit $EXIT_CODE)"
+                FAILED=$((FAILED + 1))
+            else
+                echo "[TIMING] PID $pid on GPU $gpu (slot $slot) finished at $(date +%H:%M:%S)"
+            fi
+            unset SLOT_PIDS[$slot]
+            unset SLOT_GPU[$slot]
+
+            # Launch next group in the freed slot (same GPU)
+            if [ $NEXT_GROUP -lt ${#VALID_GROUPS[@]} ]; then
+                k=${VALID_GROUPS[$NEXT_GROUP]}
+                launch_group "$k" "$gpu" "$slot"
+                NEXT_GROUP=$((NEXT_GROUP + 1))
+            fi
+        fi
+    done
 done
 
 if [ "$FAILED" -gt 0 ]; then

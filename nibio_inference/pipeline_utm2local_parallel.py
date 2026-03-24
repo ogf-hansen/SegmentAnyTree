@@ -48,7 +48,7 @@ if __name__ == "__main__":
     filenames = os.listdir(args.input_folder)
 
     print(f"Processing {len(filenames)} files...")
-    Parallel(n_jobs=-1)(
+    Parallel(n_jobs=32)(
         delayed(process_file)(filename, args.input_folder, args.output_folder) for filename in filenames
     )
     print(f"Output files are saved in: {args.output_folder}")
