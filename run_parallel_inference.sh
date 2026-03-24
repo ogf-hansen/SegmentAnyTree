@@ -203,9 +203,11 @@ launch_group() {
     local fc
     fc=$(find "$group_input" -maxdepth 1 -name "*.ply" -type l 2>/dev/null | wc -l)
 
+    local group_log="$group_output/worker.log"
     (
         echo "[Group $k] Starting inference on $fc files on GPU $gpu at $(date +%H:%M:%S)..."
-        CUDA_VISIBLE_DEVICES=$gpu python3 eval.py --config-name "$group_output/eval.yaml"
+        CUDA_VISIBLE_DEVICES=$gpu python3 eval.py --config-name "$group_output/eval.yaml" \
+            > "$group_log" 2>&1
         echo "[Group $k] Inference complete at $(date +%H:%M:%S). Cleaning cached .pt files..."
         if [ -d "$CACHE_DIR" ]; then
             for ply in "$group_input"/*.ply; do
@@ -240,8 +242,8 @@ while [ $NEXT_GROUP -lt ${#VALID_GROUPS[@]} ] || [ ${#SLOT_PIDS[@]} -gt 0 ]; do
     sleep 5
     for slot in "${!SLOT_PIDS[@]}"; do
         pid=${SLOT_PIDS[$slot]}
-        if ! kill -0 "$pid" 2>/dev/null; then
-            wait "$pid"
+        if [ ! -d "/proc/$pid" ]; then
+            wait "$pid" 2>/dev/null
             EXIT_CODE=$?
             gpu=${SLOT_GPU[$slot]}
             if [ "$EXIT_CODE" -ne 0 ]; then
