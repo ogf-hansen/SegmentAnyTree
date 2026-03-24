@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ssh \
     sudo \
     vim \
-    wget \
+    wget \ 
     unzip \
     less \
     libglib2.0-0 \
@@ -246,6 +246,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     unzip \
     zip \
+    # ... (any other packages that are required at runtime) ...
     && rm -rf /var/lib/apt/lists/*
 
 RUN python3.8 -m pip install --no-cache-dir \
@@ -259,5 +260,6 @@ RUN mkdir -p /home/datascience
 
 COPY . /home/nibio/mutable-outside-world
 WORKDIR /home/nibio/mutable-outside-world
- # "run_oracle_pipeline.sh"
-ENTRYPOINT ["bash", "run_oracle_pipeline.sh"]
+
+# run training
+ENTRYPOINT ["bash"]

@@ -20,8 +20,7 @@ There is a quick start for all who want to quickly process the data.
 5. Check the results in the output folder
 
 ```
-mkdir -p $HOME/segmentanytree/input
-mkdir -p $HOME/segmentanytree/output
+
 
 docker pull maciekwielgosz/segment-any-tree:latest
 

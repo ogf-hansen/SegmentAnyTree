@@ -1,7 +1,7 @@
 defaults: 
   - visualization: eval
 
-num_workers: 0
+num_workers: 4
 batch_size: 1
 cuda: 0
 weight_name: "latest" # Used during resume, select with model to load from [miou, macc, acc..., latest]
@@ -29,6 +29,7 @@ tracker_options: # Extra options for the tracker
   full_res: True
   make_submission: True
   ply_output: "maciej_eval.ply"
+  debug_viz: False # Set to True to write debug visualization PLY files (viz/, viz_for_test_*/ dirs)
 
 hydra:
   run:
