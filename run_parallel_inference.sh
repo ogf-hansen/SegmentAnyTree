@@ -54,8 +54,10 @@ mkdir -p "$DEST_DIR"
 LOG_FILE="$DEST_DIR/inference_$(date +%Y%m%d_%H%M%S).log"
 TOTAL_START=$SECONDS
 
-# Redirect all stdout and stderr to both terminal and log file
-exec > >(tee -a "$LOG_FILE") 2>&1
+# Log helper: writes to both terminal and log file
+log() {
+    echo "$@" | tee -a "$LOG_FILE"
+}
 
 log_phase_time() {
     local phase_name="$1"
@@ -63,23 +65,23 @@ log_phase_time() {
     local elapsed=$(( SECONDS - start ))
     local mins=$(( elapsed / 60 ))
     local secs=$(( elapsed % 60 ))
-    echo "[TIMING] $phase_name: ${mins}m ${secs}s"
+    log "[TIMING] $phase_name: ${mins}m ${secs}s"
 }
 
-echo "=== Parallel Inference ==="
-echo "Started at: $(date)"
-echo "Input directory: $SOURCE_DIR"
-echo "Output directory: $DEST_DIR"
-echo "Total groups: $N_GPU_WORKERS"
-echo "GPUs available: $N_GPUS"
-echo "Workers per GPU: $WORKERS_PER_GPU (max concurrent: $MAX_CONCURRENT)"
-echo "Log file: $LOG_FILE"
+log "=== Parallel Inference ==="
+log "Started at: $(date)"
+log "Input directory: $SOURCE_DIR"
+log "Output directory: $DEST_DIR"
+log "Total groups: $N_GPU_WORKERS"
+log "GPUs available: $N_GPUS"
+log "Workers per GPU: $WORKERS_PER_GPU (max concurrent: $MAX_CONCURRENT)"
+log "Log file: $LOG_FILE"
 
 # ============================================================
 # PHASE 1: Shared Preprocessing (runs once)
 # ============================================================
-echo ""
-echo "=== Phase 1: Preprocessing ==="
+log ""
+log "=== Phase 1: Preprocessing ==="
 PHASE_START=$SECONDS
 
 # Copy input files and fix naming
@@ -105,8 +107,8 @@ log_phase_time "Phase 1 (Preprocessing)" $PHASE_START
 # ============================================================
 # PHASE 2: Split files into groups
 # ============================================================
-echo ""
-echo "=== Phase 2: Splitting into $N_GPU_WORKERS groups ==="
+log ""
+log "=== Phase 2: Splitting into $N_GPU_WORKERS groups ==="
 PHASE_START=$SECONDS
 
 # Get all .ply files from utm2local
@@ -114,11 +116,11 @@ mapfile -t PLY_FILES < <(find "$DEST_DIR/utm2local" -maxdepth 1 -name "*.ply" -t
 TOTAL_FILES=${#PLY_FILES[@]}
 
 if [ "$TOTAL_FILES" -eq 0 ]; then
-    echo "ERROR: No .ply files found in $DEST_DIR/utm2local"
+    log "ERROR: No .ply files found in $DEST_DIR/utm2local"
     exit 1
 fi
 
-echo "Total files: $TOTAL_FILES"
+log "Total files: $TOTAL_FILES"
 
 # Calculate files per group (ceiling division)
 FILES_PER_GROUP=$(( (TOTAL_FILES + N_GPU_WORKERS - 1) / N_GPU_WORKERS ))
@@ -150,11 +152,11 @@ for ((k=0; k<N_GPU_WORKERS; k++)); do
 
     # Skip empty groups (can happen if files < workers)
     if [ "$COUNT" -eq 0 ]; then
-        echo "Group $k: 0 files (skipped)"
+        log "Group $k: 0 files (skipped)"
         continue
     fi
 
-    echo "Group $k: $COUNT files -> GPU $((k % N_GPUS))"
+    log "Group $k: $COUNT files -> GPU $((k % N_GPUS))"
 
     # Create group-specific eval.yaml with its own fold list and output dir
     cp "$SCRIPT_DIR/conf/eval.yaml" "$GROUP_OUTPUT_DIR/eval.yaml"
@@ -169,8 +171,8 @@ log_phase_time "Phase 2 (Splitting)" $PHASE_START
 # ============================================================
 # PHASE 3: Parallel GPU Inference (worker pool: WORKERS_PER_GPU concurrent per GPU)
 # ============================================================
-echo ""
-echo "=== Phase 3: Running $N_GPU_WORKERS groups across $N_GPUS GPU(s) ($WORKERS_PER_GPU workers/GPU, $MAX_CONCURRENT concurrent) ==="
+log ""
+log "=== Phase 3: Running $N_GPU_WORKERS groups across $N_GPUS GPU(s) ($WORKERS_PER_GPU workers/GPU, $MAX_CONCURRENT concurrent) ==="
 PHASE_START=$SECONDS
 
 # Collect valid groups into an array
@@ -188,7 +190,7 @@ for ((k=0; k<N_GPU_WORKERS; k++)); do
     VALID_GROUPS+=($k)
 done
 
-echo "Valid groups: ${#VALID_GROUPS[@]}"
+log "Valid groups: ${#VALID_GROUPS[@]}"
 
 # Cache dir for cleanup (derived from checkpoint's dataroot config)
 CACHE_DIR="/home/datascience/tmp_out_folder/utm2local/treeinsfused/processed_0.2_test"
@@ -205,27 +207,32 @@ launch_group() {
 
     local group_log="$group_output/worker.log"
     (
-        echo "[Group $k] Starting inference on $fc files on GPU $gpu at $(date +%H:%M:%S)..."
+        log "[Group $k] Starting inference on $fc files on GPU $gpu at $(date +%H:%M:%S)..."
         CUDA_VISIBLE_DEVICES=$gpu python3 eval.py --config-name "$group_output/eval.yaml" \
             > "$group_log" 2>&1
-        echo "[Group $k] Inference complete at $(date +%H:%M:%S). Cleaning cached .pt files..."
+        log "[Group $k] Inference complete at $(date +%H:%M:%S)."
+        # Clean cached .pt files in background — don't block slot from being freed
         if [ -d "$CACHE_DIR" ]; then
-            for ply in "$group_input"/*.ply; do
-                [ -e "$ply" ] || continue
-                base=$(basename "$ply" .ply)
-                rm -f "$CACHE_DIR/processed_${base}.pt" "$CACHE_DIR/raw_area_${base}.pt"
-            done
+            (
+                for ply in "$group_input"/*.ply; do
+                    [ -e "$ply" ] || continue
+                    base=$(basename "$ply" .ply)
+                    rm -f "$CACHE_DIR/processed_${base}.pt" "$CACHE_DIR/raw_area_${base}.pt"
+                done
+            ) &
         fi
     ) &
     SLOT_PIDS[$slot]=$!
     SLOT_GPU[$slot]=$gpu
-    echo "Launched group $k on GPU $gpu slot $slot (PID $!)"
+    SLOT_GROUP[$slot]=$k
+    log "Launched group $k on GPU $gpu slot $slot (PID $!)"
 }
 
 # Slot-based worker pool: each slot = one concurrent worker
 # Slots 0..MAX_CONCURRENT-1, mapped round-robin to GPUs
 declare -A SLOT_PIDS  # slot -> PID
 declare -A SLOT_GPU   # slot -> GPU id
+declare -A SLOT_GROUP # slot -> group number
 FAILED=0
 NEXT_GROUP=0
 
@@ -243,17 +250,19 @@ while [ $NEXT_GROUP -lt ${#VALID_GROUPS[@]} ] || [ ${#SLOT_PIDS[@]} -gt 0 ]; do
     for slot in "${!SLOT_PIDS[@]}"; do
         pid=${SLOT_PIDS[$slot]}
         if [ ! -d "/proc/$pid" ]; then
-            wait "$pid" 2>/dev/null
+            wait "$pid" 2>/dev/null || true
             EXIT_CODE=$?
             gpu=${SLOT_GPU[$slot]}
+            grp=${SLOT_GROUP[$slot]}
             if [ "$EXIT_CODE" -ne 0 ]; then
-                echo "ERROR: PID $pid on GPU $gpu (slot $slot) failed (exit $EXIT_CODE)"
+                log "[Group $grp] FAILED on GPU $gpu (exit $EXIT_CODE)"
                 FAILED=$((FAILED + 1))
             else
-                echo "[TIMING] PID $pid on GPU $gpu (slot $slot) finished at $(date +%H:%M:%S)"
+                log "[Group $grp] Inference complete on GPU $gpu at $(date +%H:%M:%S)"
             fi
-            unset SLOT_PIDS[$slot]
-            unset SLOT_GPU[$slot]
+            unset 'SLOT_PIDS[$slot]'
+            unset 'SLOT_GPU[$slot]'
+            unset 'SLOT_GROUP[$slot]'
 
             # Launch next group in the freed slot (same GPU)
             if [ $NEXT_GROUP -lt ${#VALID_GROUPS[@]} ]; then
@@ -266,18 +275,18 @@ while [ $NEXT_GROUP -lt ${#VALID_GROUPS[@]} ] || [ ${#SLOT_PIDS[@]} -gt 0 ]; do
 done
 
 if [ "$FAILED" -gt 0 ]; then
-    echo "ERROR: $FAILED group(s) failed. Check logs above."
+    log "ERROR: $FAILED group(s) failed. Check logs above."
     exit 1
 fi
 
-echo "All groups completed successfully."
+log "All groups completed successfully."
 log_phase_time "Phase 3 (Inference total)" $PHASE_START
 
 # ============================================================
 # PHASE 4: Collect results and merge
 # ============================================================
-echo ""
-echo "=== Phase 4: Collecting results and merging ==="
+log ""
+log "=== Phase 4: Collecting results and merging ==="
 PHASE_START=$SECONDS
 
 FINAL_DEST_DIR="$DEST_DIR/final_results"
@@ -286,7 +295,7 @@ FINAL_DEST_DIR="$DEST_DIR/final_results"
 for ((k=0; k<N_GPU_WORKERS; k++)); do
     GROUP_OUTPUT_DIR="$DEST_DIR/group_${k}"
     if [ -f "$GROUP_OUTPUT_DIR/eval.yaml" ]; then
-        echo "Merging predictions from group $k..."
+        log "Merging predictions from group $k..."
         python3 "$SCRIPT_DIR/nibio_inference/merge_predictions.py" \
             -e "$GROUP_OUTPUT_DIR/eval.yaml" \
             -p "$GROUP_OUTPUT_DIR" \
@@ -303,10 +312,10 @@ TOTAL_ELAPSED=$(( SECONDS - TOTAL_START ))
 TOTAL_MINS=$(( TOTAL_ELAPSED / 60 ))
 TOTAL_SECS=$(( TOTAL_ELAPSED % 60 ))
 
-echo ""
-echo "=== Complete ==="
-echo "Finished at: $(date)"
-echo "[TIMING] Total elapsed: ${TOTAL_MINS}m ${TOTAL_SECS}s"
-echo "Number of files in final results: $num_files"
-echo "Results directory: $FINAL_DEST_DIR"
-echo "Log file: $LOG_FILE"
+log ""
+log "=== Complete ==="
+log "Finished at: $(date)"
+log "[TIMING] Total elapsed: ${TOTAL_MINS}m ${TOTAL_SECS}s"
+log "Number of files in final results: $num_files"
+log "Results directory: $FINAL_DEST_DIR"
+log "Log file: $LOG_FILE"
