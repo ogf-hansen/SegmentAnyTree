@@ -103,7 +103,8 @@ def merge_all(eval_yaml_path, predictions_dir, output_dir, verbose=False):
     if verbose:
         print(f"Merging {len(tasks)} files...")
 
-    Parallel(n_jobs=-1)(
+    n_jobs = min(len(tasks), int(os.environ.get('MERGE_JOBS', 4)))
+    Parallel(n_jobs=n_jobs)(
         delayed(merge_single)(fold_path, pred_path, out_path, verbose)
         for fold_path, pred_path, out_path in tasks
     )
