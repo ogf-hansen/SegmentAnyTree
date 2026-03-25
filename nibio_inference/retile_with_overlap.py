@@ -80,17 +80,20 @@ def retile_single(tile_path, neighbor_paths, overlap, output_path,
         target_scales = target.header.scales
         target_offsets = target.header.offsets
 
+        re_encoded_arrays = []
         for bp, bp_hdr in zip(border_points, border_headers):
             # Decode to real-world coordinates using the neighbor's scale/offset
             bp_x = bp.array['X'] * bp_hdr.scales[0] + bp_hdr.offsets[0]
             bp_y = bp.array['Y'] * bp_hdr.scales[1] + bp_hdr.offsets[1]
             bp_z = bp.array['Z'] * bp_hdr.scales[2] + bp_hdr.offsets[2]
-            # Re-encode using target's scale/offset
-            bp.array['X'] = np.round((bp_x - target_offsets[0]) / target_scales[0]).astype(np.int32)
-            bp.array['Y'] = np.round((bp_y - target_offsets[1]) / target_scales[1]).astype(np.int32)
-            bp.array['Z'] = np.round((bp_z - target_offsets[2]) / target_scales[2]).astype(np.int32)
+            # Re-encode using target's scale/offset into a fresh copy
+            arr = bp.array.copy()
+            arr['X'] = np.round((bp_x - target_offsets[0]) / target_scales[0]).astype(np.int32)
+            arr['Y'] = np.round((bp_y - target_offsets[1]) / target_scales[1]).astype(np.int32)
+            arr['Z'] = np.round((bp_z - target_offsets[2]) / target_scales[2]).astype(np.int32)
+            re_encoded_arrays.append(arr)
 
-        all_arrays = [target.points.array] + [bp.array for bp in border_points]
+        all_arrays = [target.points.array] + re_encoded_arrays
         merged_array = np.concatenate(all_arrays)
         output = laspy.LasData(target.header)
         output.points = laspy.ScaleAwarePointRecord(
