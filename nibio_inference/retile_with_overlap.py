@@ -51,10 +51,11 @@ def retile_single(tile_path, neighbor_paths, overlap, output_path,
     ymin, ymax = target.header.y_min, target.header.y_max
 
     border_points = []
+    border_headers = []
     for nb_path in neighbor_paths:
         nb = laspy.read(nb_path)
-        x = nb.x
-        y = nb.y
+        x = np.array(nb.x)
+        y = np.array(nb.y)
         # Points inside expanded bbox
         mask = (
             (x >= xmin - overlap) & (x <= xmax + overlap) &
@@ -68,8 +69,27 @@ def retile_single(tile_path, neighbor_paths, overlap, output_path,
         strip_mask = mask & ~inner
         if np.any(strip_mask):
             border_points.append(nb.points[strip_mask])
+            border_headers.append(nb.header)
 
     if border_points:
+        # Re-encode border points using the target tile's scale/offset.
+        # Each LAS tile stores coordinates as scaled integers:
+        #   utm_coord = raw_int * scale + offset
+        # Tiles may have different offsets, so raw integers from a neighbor
+        # decoded with the target's offset would produce wrong coordinates.
+        target_scales = target.header.scales
+        target_offsets = target.header.offsets
+
+        for bp, bp_hdr in zip(border_points, border_headers):
+            # Decode to real-world coordinates using the neighbor's scale/offset
+            bp_x = bp.array['X'] * bp_hdr.scales[0] + bp_hdr.offsets[0]
+            bp_y = bp.array['Y'] * bp_hdr.scales[1] + bp_hdr.offsets[1]
+            bp_z = bp.array['Z'] * bp_hdr.scales[2] + bp_hdr.offsets[2]
+            # Re-encode using target's scale/offset
+            bp.array['X'] = np.round((bp_x - target_offsets[0]) / target_scales[0]).astype(np.int32)
+            bp.array['Y'] = np.round((bp_y - target_offsets[1]) / target_scales[1]).astype(np.int32)
+            bp.array['Z'] = np.round((bp_z - target_offsets[2]) / target_scales[2]).astype(np.int32)
+
         all_arrays = [target.points.array] + [bp.array for bp in border_points]
         merged_array = np.concatenate(all_arrays)
         output = laspy.LasData(target.header)

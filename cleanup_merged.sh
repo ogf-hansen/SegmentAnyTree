@@ -3,20 +3,17 @@
 # Removes utm2local source files and group prediction dirs for groups that:
 #   1. Have "Merge complete" in the main inference log
 #   2. Have NO errors/exceptions in their worker.log
-#   3. Have not been cleaned already
+#   3. Have complete predictions (all expected .npz files present)
+#   4. Have not been cleaned already
 #
-# Usage: bash /home/mv_out/cleanup_merged.sh [--dry-run]
-#   --dry-run  Show what would be removed without deleting anything
+# Usage:
+#   bash cleanup_merged.sh              # dry-run (default, safe)
+#   bash cleanup_merged.sh --execute    # actually delete files
+#   bash cleanup_merged.sh --status     # show full status of all groups
 
 set -euo pipefail
 
-DRY_RUN=false
-if [[ "${1:-}" == "--dry-run" ]]; then
-    DRY_RUN=true
-    echo "[DRY RUN] No files will be deleted."
-    echo ""
-fi
-
+MODE="${1:---dry-run}"
 LOG_FILE="/home/mv_out/inference_20260324_175758.log"
 OUTPUT_DIR="/home/mv_out"
 
@@ -28,9 +25,70 @@ fi
 # Get merged groups from main log
 MERGED=$(grep "Merge complete" "$LOG_FILE" | grep -oP "Group \K\d+" | sort -n | uniq)
 
+# Get all launched groups
+LAUNCHED=$(grep "Launched group" "$LOG_FILE" | grep -oP "Launched group \K\d+" | sort -n | uniq)
+
+if [[ "$MODE" == "--status" ]]; then
+    echo "=== Full Group Status ==="
+    echo ""
+    for g in $(echo "$LAUNCHED" | sort -n); do
+        GROUP_DIR="$OUTPUT_DIR/group_${g}"
+        INPUT_DIR="$OUTPUT_DIR/group_${g}_input"
+        WL="$GROUP_DIR/worker.log"
+
+        IS_MERGED=$(echo "$MERGED" | grep -qw "$g" && echo "YES" || echo "NO")
+
+        PREDICTIONS=0
+        EXPECTED=0
+        if [[ -d "$INPUT_DIR" ]]; then
+            EXPECTED=$(ls "$INPUT_DIR"/*.ply 2>/dev/null | wc -l)
+        fi
+        if [[ -d "$GROUP_DIR" ]]; then
+            PREDICTIONS=$(ls "$GROUP_DIR"/predictions_*.npz 2>/dev/null | wc -l)
+        fi
+
+        HAS_ERRORS="NO"
+        ERROR_TYPE=""
+        if [[ -f "$WL" ]]; then
+            if grep -q "TerminatedWorkerError" "$WL" 2>/dev/null; then
+                HAS_ERRORS="YES"
+                ERROR_TYPE="OOM/SIGSEGV"
+            elif grep -qi "Traceback\|Exception" "$WL" 2>/dev/null; then
+                HAS_ERRORS="YES"
+                ERROR_TYPE="other"
+            fi
+        fi
+
+        CLEANED="NO"
+        if [[ ! -d "$GROUP_DIR" ]] && [[ ! -d "$INPUT_DIR" ]]; then
+            CLEANED="YES"
+        fi
+
+        if [[ "$CLEANED" == "YES" ]]; then
+            STATUS="CLEANED"
+        elif [[ "$IS_MERGED" == "YES" ]] && [[ "$HAS_ERRORS" == "NO" ]]; then
+            STATUS="SAFE_TO_CLEAN"
+        elif [[ "$HAS_ERRORS" == "YES" ]]; then
+            STATUS="ERROR($ERROR_TYPE)"
+        elif [[ "$PREDICTIONS" -lt "$EXPECTED" ]] && [[ "$EXPECTED" -gt 0 ]]; then
+            STATUS="INCOMPLETE_INF($PREDICTIONS/$EXPECTED)"
+        else
+            STATUS="NO_MERGE"
+        fi
+
+        echo "  group_$g: $STATUS"
+    done
+
+    echo ""
+    df -h /home
+    exit 0
+fi
+
+# Main cleanup logic
 CLEANED=0
 SKIPPED_NODATA=0
 SKIPPED_ERRORS=0
+SKIPPED_INCOMPLETE=0
 FREED_BYTES=0
 
 for g in $MERGED; do
@@ -43,18 +101,29 @@ for g in $MERGED; do
         continue
     fi
 
-    # Check worker log for errors - if ANY errors, skip this group
+    # Check worker log for errors - if ANY errors, skip (keep predictions for re-merge)
     WORKER_LOG="$GROUP_DIR/worker.log"
     if [[ -f "$WORKER_LOG" ]]; then
-        ERROR_COUNT=$(grep -ci "error\|Traceback\|Exception\|SIGSEGV\|Killed\|TerminatedWorker" "$WORKER_LOG" 2>/dev/null || true)
+        ERROR_COUNT=$(grep -ci "TerminatedWorkerError\|Traceback\|SIGSEGV\|Killed" "$WORKER_LOG" 2>/dev/null || true)
         if [[ "$ERROR_COUNT" -gt 0 ]]; then
-            echo "SKIP group_$g: $ERROR_COUNT error(s) found in worker.log (keeping predictions)"
+            echo "SKIP group_$g: errors in worker.log (keeping predictions for re-merge)"
             SKIPPED_ERRORS=$((SKIPPED_ERRORS + 1))
             continue
         fi
     fi
 
-    # Calculate size before removal
+    # Check predictions are complete
+    if [[ -d "$INPUT_DIR" ]] && [[ -d "$GROUP_DIR" ]]; then
+        EXPECTED=$(ls "$INPUT_DIR"/*.ply 2>/dev/null | wc -l)
+        PREDICTIONS=$(ls "$GROUP_DIR"/predictions_*.npz 2>/dev/null | wc -l)
+        if [[ "$PREDICTIONS" -lt "$EXPECTED" ]] && [[ "$EXPECTED" -gt 0 ]]; then
+            echo "SKIP group_$g: incomplete predictions ($PREDICTIONS/$EXPECTED) - needs re-inference"
+            SKIPPED_INCOMPLETE=$((SKIPPED_INCOMPLETE + 1))
+            continue
+        fi
+    fi
+
+    # Calculate size
     GROUP_SIZE=0
     if [[ -d "$GROUP_DIR" ]]; then
         GROUP_SIZE=$(du -sb "$GROUP_DIR" 2>/dev/null | awk '{print $1}')
@@ -77,16 +146,13 @@ for g in $MERGED; do
     TOTAL=$((GROUP_SIZE + UTM_SIZE))
     FREED_BYTES=$((FREED_BYTES + TOTAL))
 
-    if $DRY_RUN; then
+    if [[ "$MODE" != "--execute" ]]; then
         echo "WOULD CLEAN group_$g: ~$((TOTAL / 1024 / 1024)) MB"
     else
-        # Remove utm2local source files (the actual data the symlinks point to)
         for TARGET in $UTM_FILES; do
             rm -f "$TARGET"
         done
-        # Remove input symlink dir
         rm -rf "$INPUT_DIR"
-        # Remove predictions dir
         rm -rf "$GROUP_DIR"
         echo "CLEANED group_$g: ~$((TOTAL / 1024 / 1024)) MB freed"
     fi
@@ -96,9 +162,13 @@ done
 
 echo ""
 echo "=== Summary ==="
-echo "Cleaned:             $CLEANED groups"
-echo "Skipped (already):   $SKIPPED_NODATA groups"
-echo "Skipped (errors):    $SKIPPED_ERRORS groups"
-echo "Space freed:         $((FREED_BYTES / 1024 / 1024 / 1024)) GB ($((FREED_BYTES / 1024 / 1024)) MB)"
+if [[ "$MODE" != "--execute" ]]; then
+    echo "MODE: DRY RUN (use --execute to actually delete)"
+fi
+echo "Cleanable:               $CLEANED groups"
+echo "Already cleaned:         $SKIPPED_NODATA groups"
+echo "Skipped (errors):        $SKIPPED_ERRORS groups (need re-merge)"
+echo "Skipped (incomplete):    $SKIPPED_INCOMPLETE groups (need re-inference)"
+echo "Space to free:           $((FREED_BYTES / 1024 / 1024 / 1024)) GB ($((FREED_BYTES / 1024 / 1024)) MB)"
 echo ""
 df -h /home
