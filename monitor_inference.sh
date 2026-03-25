@@ -103,8 +103,8 @@ echo "Queued: $QUEUED groups waiting"
 
 # Time estimate
 if [ "$COMPLETED_COUNT" -gt 0 ]; then
-    START_TIME=$(grep "Started at:" "$LOG_FILE" | grep -oP "\d{2}:\d{2}:\d{2}")
-    START_EPOCH=$(date -d "today $START_TIME" +%s 2>/dev/null)
+    START_DATE=$(grep "Started at:" "$LOG_FILE" | sed 's/Started at: //')
+    START_EPOCH=$(date -d "$START_DATE" +%s 2>/dev/null)
     NOW_EPOCH=$(date +%s)
 
     if [ -n "$START_EPOCH" ]; then
