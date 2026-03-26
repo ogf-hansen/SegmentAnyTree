@@ -18,7 +18,6 @@ Usage:
 """
 
 import argparse
-import copy
 import json
 import os
 import sys
@@ -340,43 +339,24 @@ def stitch_tiles(
         for local_id, global_id in mapping.items():
             remapped[instances == local_id] = global_id
 
-        # Create output LAS with PredInstance upgraded to uint32
-        out_header = copy.deepcopy(las_in.header)
+        # Create output LAS with core points only, PredInstance as uint32
+        output = laspy.LasData(las_in.header)
+        output.points = core_points
 
-        # Remove existing PredInstance extra dim and re-add as uint32
-        existing_extras = list(out_header.point_format.extra_dims)
-        new_extras = []
-        for ed in existing_extras:
-            if ed.name == 'PredInstance':
-                new_extras.append(laspy.ExtraBytesParams(
-                    name='PredInstance', type=np.uint32,
-                    description="Remapped instance ID"
-                ))
-            else:
-                new_extras.append(laspy.ExtraBytesParams(
-                    name=ed.name, type=ed.dtype
-                ))
-
-        # Rebuild point format with updated extra dims
-        out_header.point_format = laspy.PointFormat(
-            las_in.header.point_format.id,
-            extra_dims=new_extras
-        )
-
-        output = laspy.LasData(out_header)
-        # Copy standard fields from core points
-        for dim_name in las_in.point_format.dimension_names:
-            if dim_name in output.point_format.dimension_names:
-                if dim_name == 'PredInstance':
-                    continue
-                output[dim_name] = np.array(las_in.points[dim_name])[core]
+        # Replace PredInstance with uint32 version
+        if 'PredInstance' in output.point_format.dimension_names:
+            output.remove_extra_dim('PredInstance')
+        output.add_extra_dim(laspy.ExtraBytesParams(
+            name='PredInstance', type=np.uint32,
+            description="Remapped instance ID"
+        ))
         output['PredInstance'] = remapped
 
         # Write
         out_name = os.path.basename(segmented_files[name])
-        # Ensure .las extension
-        if out_name.lower().endswith('.laz'):
-            out_name = out_name[:-4] + '.las'
+        # Ensure .laz extension
+        if out_name.lower().endswith('.las'):
+            out_name = out_name[:-4] + '.laz'
         output_path = os.path.join(output_dir, out_name)
         output.write(output_path)
 
