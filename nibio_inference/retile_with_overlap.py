@@ -81,6 +81,7 @@ def retile_single(tile_path, neighbor_paths, overlap, output_path,
         strip_mask = mask & ~inner
         if np.any(strip_mask):
             border_points.append(nb.points[strip_mask])
+            border_headers.append(nb.header)
 
     if border_points:
         # Re-encode border points using the target tile's scale/offset.
@@ -92,11 +93,11 @@ def retile_single(tile_path, neighbor_paths, overlap, output_path,
         target_offsets = target.header.offsets
 
         re_encoded_arrays = []
-        for bp in border_points:
+        for bp, bp_hdr in zip(border_points, border_headers):
             # Decode via laspy properties (applies neighbor's scale/offset automatically)
-            bp_x = bp.x
-            bp_y = bp.y
-            bp_z = bp.z
+            bp_x = bp.array['X'] * bp_hdr.scales[0] + bp_hdr.offsets[0]
+            bp_y = bp.array['Y'] * bp_hdr.scales[1] + bp_hdr.offsets[1]
+            bp_z = bp.array['Z'] * bp_hdr.scales[2] + bp_hdr.offsets[2]
             # Re-encode using target's scale/offset into a fresh copy
             arr = bp.array.copy()
             arr['X'] = np.round((bp_x - target_offsets[0]) / target_scales[0]).astype(np.int32)
