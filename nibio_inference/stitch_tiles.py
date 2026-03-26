@@ -18,6 +18,7 @@ Usage:
 """
 
 import argparse
+import copy
 import json
 import os
 import sys
@@ -306,7 +307,7 @@ def stitch_tiles(
 
     tile_mappings = {name: {} for name in names_list}
 
-    for name in names_list:
+    for name in tqdm(names_list):
         da = tile_data[name]
         local_instances = np.unique(da['instances'][da['core_mask']])
         for inst in local_instances:
@@ -335,16 +336,40 @@ def stitch_tiles(
         # Remap instance IDs
         instances = np.array(da['instances'][core])
         mapping = tile_mappings[name]
-        remapped = np.zeros_like(instances)
+        remapped = np.zeros(len(instances), dtype=np.uint32)
         for local_id, global_id in mapping.items():
             remapped[instances == local_id] = global_id
 
-        # Create output LAS
-        output = laspy.LasData(las_in.header)
-        output.points = laspy.ScaleAwarePointRecord(
-            core_points.array, las_in.header.point_format,
-            scales=las_in.header.scales, offsets=las_in.header.offsets
+        # Create output LAS with PredInstance upgraded to uint32
+        out_header = copy.deepcopy(las_in.header)
+
+        # Remove existing PredInstance extra dim and re-add as uint32
+        existing_extras = list(out_header.point_format.extra_dims)
+        new_extras = []
+        for ed in existing_extras:
+            if ed.name == 'PredInstance':
+                new_extras.append(laspy.ExtraBytesParams(
+                    name='PredInstance', type=np.uint32,
+                    description="Remapped instance ID"
+                ))
+            else:
+                new_extras.append(laspy.ExtraBytesParams(
+                    name=ed.name, type=ed.dtype
+                ))
+
+        # Rebuild point format with updated extra dims
+        out_header.point_format = laspy.PointFormat(
+            las_in.header.point_format.id,
+            extra_dims=new_extras
         )
+
+        output = laspy.LasData(out_header)
+        # Copy standard fields from core points
+        for dim_name in las_in.point_format.dimension_names:
+            if dim_name in output.point_format.dimension_names:
+                if dim_name == 'PredInstance':
+                    continue
+                output[dim_name] = np.array(las_in.points[dim_name])[core]
         output['PredInstance'] = remapped
 
         # Write
