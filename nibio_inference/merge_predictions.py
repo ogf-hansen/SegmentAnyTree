@@ -100,6 +100,10 @@ def merge_all(eval_yaml_path, predictions_dir, output_dir, verbose=False):
         output_path = os.path.join(output_dir, f"{base_name}.las")
         tasks.append((fold_path, predictions_path, output_path))
 
+    if not tasks:
+        print(f"No prediction files found in {predictions_dir}, nothing to merge.")
+        return
+
     if verbose:
         print(f"Merging {len(tasks)} files...")
 

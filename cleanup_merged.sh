@@ -14,7 +14,7 @@
 set -euo pipefail
 
 MODE="${1:---dry-run}"
-LOG_FILE="/home/mv_out/inference_20260324_175758.log"
+LOG_FILE="/home/mv_out/inference_20260326_013617.log"
 OUTPUT_DIR="/home/mv_out"
 
 if [[ ! -f "$LOG_FILE" ]]; then

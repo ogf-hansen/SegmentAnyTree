@@ -216,7 +216,8 @@ launch_group() {
         # Launch merge + cache cleanup in background — don't block slot from being freed
         (
             # Merge predictions to final .las files (CPU only, no GPU needed)
-            if [ -f "$group_output/eval.yaml" ]; then
+            NPZ_COUNT=$(find "$group_output" -maxdepth 1 -name "predictions_*.npz" 2>/dev/null | wc -l)
+            if [ -f "$group_output/eval.yaml" ] && [ "$NPZ_COUNT" -gt 0 ]; then
                 log "[Group $k] Starting merge at $(date +%H:%M:%S)..."
                 python3 "$SCRIPT_DIR/nibio_inference/merge_predictions.py" \
                     -e "$group_output/eval.yaml" \
@@ -224,6 +225,8 @@ launch_group() {
                     -o "$final_dir" \
                     -v >> "$group_log" 2>&1
                 log "[Group $k] Merge complete at $(date +%H:%M:%S)."
+            elif [ "$NPZ_COUNT" -eq 0 ]; then
+                log "[Group $k] No predictions produced (no instances detected), skipping merge."
             fi
             # Clean cached .pt files
             if [ -d "$CACHE_DIR" ]; then
@@ -314,6 +317,13 @@ wait
 for ((k=0; k<N_GPU_WORKERS; k++)); do
     GROUP_OUTPUT_DIR="$DEST_DIR/group_${k}"
     if [ -f "$GROUP_OUTPUT_DIR/eval.yaml" ]; then
+        # Skip groups that produced no prediction files (no instances detected)
+        NPZ_COUNT=$(find "$GROUP_OUTPUT_DIR" -maxdepth 1 -name "predictions_*.npz" 2>/dev/null | wc -l)
+        if [ "$NPZ_COUNT" -eq 0 ]; then
+            log "Group $k: No prediction files (no instances detected), skipping merge."
+            continue
+        fi
+
         # Check if this group produced any .las output
         EVAL_YAML="$GROUP_OUTPUT_DIR/eval.yaml"
         EXPECTED=$(python3 -c "
@@ -327,7 +337,7 @@ for p in fold:
 " 2>/dev/null)
         MISSING=0
         for base in $EXPECTED; do
-            if [ ! -f "$FINAL_DEST_DIR/${base}.las" ]; then
+            if [ ! -f "$FINAL_DEST_DIR/${base}.las" ] && [ ! -f "$FINAL_DEST_DIR/${base}.laz" ]; then
                 MISSING=$((MISSING + 1))
             fi
         done
