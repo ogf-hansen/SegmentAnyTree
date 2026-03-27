@@ -309,9 +309,14 @@ FINAL_DEST_DIR="$DEST_DIR/final_results"
 mkdir -p "$FINAL_DEST_DIR"
 
 # Merging happens inline after each group's inference (launched in background).
-# Wait for any remaining merge processes to finish.
+# Wait for ALL merge processes to finish (including grandchild processes).
 log "Waiting for background merge processes to complete..."
 wait
+# Also wait for any merge_predictions.py processes still running
+while pgrep -f "merge_predictions.py.*$DEST_DIR" > /dev/null 2>&1; do
+    log "Merge processes still running, waiting..."
+    sleep 10
+done
 
 # Check for any groups that may have failed merging and retry
 for ((k=0; k<N_GPU_WORKERS; k++)); do
