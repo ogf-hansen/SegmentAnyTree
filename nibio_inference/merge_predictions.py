@@ -44,7 +44,7 @@ def merge_single(fold_path, predictions_path, output_path, verbose=False):
     tree = BallTree(pred_pos, leaf_size=64)
     print(f"  Tree built. Querying...", flush=True)
     CHUNK_SIZE = 500_000
-    n_query_jobs = min(int(os.environ.get('QUERY_JOBS', 8)), os.cpu_count() or 8)
+    n_query_jobs = min(int(os.environ.get('SAT_QUERY_JOBS', 8)), os.cpu_count() or 8)
     if len(query_pts) > CHUNK_SIZE:
         chunks = [query_pts[start:min(start + CHUNK_SIZE, len(query_pts))]
                   for start in range(0, len(query_pts), CHUNK_SIZE)]
@@ -129,7 +129,7 @@ def merge_all(eval_yaml_path, predictions_dir, output_dir, verbose=False):
     if verbose:
         print(f"Merging {len(tasks)} files...")
 
-    n_jobs = min(len(tasks), int(os.environ.get('MERGE_JOBS', 4)))
+    n_jobs = min(len(tasks), int(os.environ.get('SAT_MERGE_JOBS', 1)))
     Parallel(n_jobs=n_jobs)(
         delayed(merge_single)(fold_path, pred_path, out_path, verbose)
         for fold_path, pred_path, out_path in tasks

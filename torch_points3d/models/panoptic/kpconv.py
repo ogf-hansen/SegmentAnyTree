@@ -492,7 +492,7 @@ class KPConvPaper(UnwrappedUnetBasedModel):
         return embed_clusters, offset_clusters, predicted_ins_labels_byEmbed, predicted_ins_labels_byOffset
     
     def meanshift_cluster(self, prediction, bandwidth):
-        ms = MeanShift(bandwidth, bin_seeding=True, n_jobs=-1)
+        ms = MeanShift(bandwidth, bin_seeding=True, n_jobs=int(os.environ.get('SAT_MEANSHIFT_JOBS', 4)))
         #print ('Mean shift clustering, might take some time ...')
         ms.fit(prediction)
         labels = ms.labels_

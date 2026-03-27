@@ -643,7 +643,8 @@ class PanopticTracker(SegmentationTracker):
                     print("Doing knn")
                     print("data is on device: {}".format(test_area_i.pos.device))
 
-                    assign_index = knn(test_area_i.pos[has_prediction].cpu(), test_area_i.pos.cpu(), k=1, num_workers=48)
+                    _knn_workers = int(os.environ.get('SAT_KNN_WORKERS', 8))
+                    assign_index = knn(test_area_i.pos[has_prediction].cpu(), test_area_i.pos.cpu(), k=1, num_workers=_knn_workers)
 
                     print("Done knn")
 

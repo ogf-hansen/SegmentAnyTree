@@ -24,6 +24,11 @@ def modify_yaml(file_path, new_fold, output_dir_path=None):
     # Update the fold field
     data['data']['fold'] = list(new_fold)
 
+    # Override num_workers from environment if set
+    sat_num_workers = os.environ.get('SAT_NUM_WORKERS')
+    if sat_num_workers is not None:
+        data['num_workers'] = int(sat_num_workers)
+
     # Update the output_dir field
     if output_dir_path:
         data['hydra']['run']['dir'] = output_dir_path

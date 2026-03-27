@@ -4,10 +4,23 @@ set -e
 # Parallel inference script for SegmentAnyTree
 # Splits tiles into groups and runs multiple eval.py processes concurrently across GPUs.
 # Usage: run_parallel_inference.sh <input_dir> <output_dir> [clean_output_dir]
-# Environment variables:
-#   N_GPU_WORKERS  - total number of groups to split data into (default: 2)
-#   N_GPUS         - number of GPUs available (default: 1)
+#
+# Environment variables (scheduling):
+#   N_GPU_WORKERS   - total number of groups to split data into (default: 2)
+#   N_GPUS          - number of GPUs available (default: 1)
 #   WORKERS_PER_GPU - max concurrent workers per GPU (default: 2)
+#
+# Environment variables (worker tuning — SAT_* prefix):
+#   All have auto-calculated defaults based on CPU count and MAX_CONCURRENT.
+#   Override any of them before running this script.
+#
+#   OMP_NUM_THREADS     - OpenMP threads per process (default: auto)
+#   SAT_KNN_WORKERS     - threads for KNN in panoptic tracker (default: auto)
+#   SAT_MEANSHIFT_JOBS  - jobs for MeanShift clustering (default: auto)
+#   SAT_MERGE_JOBS      - parallel file merges (default: 1)
+#   SAT_QUERY_JOBS      - threads for BallTree query (default: auto)
+#   SAT_UTM_JOBS        - jobs for utm2local preprocessing (default: -1 = all CPUs)
+#   SAT_NUM_WORKERS     - PyTorch dataloader workers (default: auto)
 
 SOURCE_DIR="$1"
 DEST_DIR="$2"
@@ -17,6 +30,25 @@ N_GPU_WORKERS="${N_GPU_WORKERS:-2}"
 N_GPUS="${N_GPUS:-1}"
 WORKERS_PER_GPU="${WORKERS_PER_GPU:-2}"
 MAX_CONCURRENT=$((N_GPUS * WORKERS_PER_GPU))
+
+# ============================================================
+# Auto-calculate SAT_* worker defaults based on hardware
+# ============================================================
+TOTAL_CPUS=$(nproc)
+# Budget: leave ~20% headroom for OS/other tasks
+USABLE_CPUS=$(( TOTAL_CPUS * 80 / 100 ))
+# CPUs available per concurrent inference process
+CPUS_PER_WORKER=$(( USABLE_CPUS / (MAX_CONCURRENT > 0 ? MAX_CONCURRENT : 1) ))
+# Minimum 1
+CPUS_PER_WORKER=$(( CPUS_PER_WORKER > 0 ? CPUS_PER_WORKER : 1 ))
+
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-$CPUS_PER_WORKER}"
+export SAT_KNN_WORKERS="${SAT_KNN_WORKERS:-$CPUS_PER_WORKER}"
+export SAT_MEANSHIFT_JOBS="${SAT_MEANSHIFT_JOBS:-$CPUS_PER_WORKER}"
+export SAT_MERGE_JOBS="${SAT_MERGE_JOBS:-1}"
+export SAT_QUERY_JOBS="${SAT_QUERY_JOBS:-$CPUS_PER_WORKER}"
+export SAT_UTM_JOBS="${SAT_UTM_JOBS:--1}"
+export SAT_NUM_WORKERS="${SAT_NUM_WORKERS:-$(( CPUS_PER_WORKER > 4 ? 4 : CPUS_PER_WORKER ))}"
 
 # Set default values if not provided
 : "${SOURCE_DIR:=/home/nibio/mutable-outside-world/data_for_test}"
@@ -75,6 +107,8 @@ log "Output directory: $DEST_DIR"
 log "Total groups: $N_GPU_WORKERS"
 log "GPUs available: $N_GPUS"
 log "Workers per GPU: $WORKERS_PER_GPU (max concurrent: $MAX_CONCURRENT)"
+log "CPUs: $TOTAL_CPUS total, ~$CPUS_PER_WORKER per worker"
+log "SAT config: OMP=$OMP_NUM_THREADS KNN=$SAT_KNN_WORKERS MeanShift=$SAT_MEANSHIFT_JOBS Merge=$SAT_MERGE_JOBS Query=$SAT_QUERY_JOBS DataLoader=$SAT_NUM_WORKERS UTM=$SAT_UTM_JOBS"
 log "Log file: $LOG_FILE"
 
 # ============================================================

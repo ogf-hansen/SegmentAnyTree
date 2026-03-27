@@ -206,7 +206,7 @@ class PointGroupEmbed(BaseModel):
         #    self._dump_visuals(epoch, backbone_features)
 
     def meanshift_cluster(self, prediction, bandwidth):
-        ms = MeanShift(bandwidth=bandwidth,bin_seeding=True, n_jobs=-1)
+        ms = MeanShift(bandwidth=bandwidth,bin_seeding=True, n_jobs=int(os.environ.get('SAT_MEANSHIFT_JOBS', 4)))
         #print ('Mean shift clustering, might take some time ...')
         ms.fit(prediction)
         labels = ms.labels_
