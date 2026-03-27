@@ -12,7 +12,7 @@ import sys
 import numpy as np
 import yaml
 from joblib import Parallel, delayed
-from scipy.spatial import cKDTree
+from sklearn.neighbors import BallTree
 
 from nibio_inference.ply_to_pandas import ply_to_pandas
 from nibio_inference.pandas_to_las import pandas_to_las
@@ -21,21 +21,43 @@ from nibio_inference.pandas_to_las import pandas_to_las
 def merge_single(fold_path, predictions_path, output_path, verbose=False):
     """Merge a single .npz prediction file with its original point cloud."""
     if verbose:
-        print(f"Merging: {os.path.basename(fold_path)}")
+        print(f"Merging: {os.path.basename(fold_path)}", flush=True)
 
     # Load predictions (subsampled positions + labels)
+    print(f"  Loading predictions from {os.path.basename(predictions_path)}...", flush=True)
     preds = np.load(predictions_path)
     pred_pos = preds['pos']
     semantic_labels = preds['semantic_labels']
     instance_labels = preds['instance_labels']
+    print(f"  Predictions loaded: {len(pred_pos)} points", flush=True)
 
     # Load original point cloud from utm2local
+    print(f"  Loading original PLY...", flush=True)
     original_df = ply_to_pandas(fold_path)
     original_df.rename(columns={'X': 'x', 'Y': 'y', 'Z': 'z'}, inplace=True)
+    print(f"  Original loaded: {len(original_df)} points", flush=True)
 
     # KDTree match: for each original point, find nearest prediction point
-    tree = cKDTree(pred_pos)
-    distances, indices = tree.query(original_df[['x', 'y', 'z']].values, k=1)
+    query_pts = original_df[['x', 'y', 'z']].values
+    print(f"  Nearest-neighbor matching {len(query_pts)} -> {len(pred_pos)} points...", flush=True)
+
+    tree = BallTree(pred_pos, leaf_size=64)
+    print(f"  Tree built. Querying...", flush=True)
+    CHUNK_SIZE = 500_000
+    n_query_jobs = min(int(os.environ.get('QUERY_JOBS', 8)), os.cpu_count() or 8)
+    if len(query_pts) > CHUNK_SIZE:
+        chunks = [query_pts[start:min(start + CHUNK_SIZE, len(query_pts))]
+                  for start in range(0, len(query_pts), CHUNK_SIZE)]
+        print(f"  Querying {len(chunks)} chunks with {n_query_jobs} workers...", flush=True)
+        results = Parallel(n_jobs=n_query_jobs, backend='threading')(
+            delayed(tree.query)(chunk, k=1) for chunk in chunks
+        )
+        distances = np.concatenate([d[:, 0] for d, _ in results])
+        indices = np.concatenate([idx[:, 0] for _, idx in results])
+    else:
+        d, idx = tree.query(query_pts, k=1)
+        distances = d[:, 0]
+        indices = idx[:, 0]
 
     # Assign predictions
     original_df['PredSemantic'] = semantic_labels[indices]
