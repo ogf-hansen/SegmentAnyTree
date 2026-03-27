@@ -352,6 +352,14 @@ def stitch_tiles(
         ))
         output['PredInstance'] = remapped
 
+        # Copy VLRs (contains CRS/projection info)
+        output.vlrs = list(las_in.vlrs)
+
+        # Copy EVLRs (LAS 1.4 extended variable length records)
+        if hasattr(las_in, 'evlrs') and las_in.evlrs:
+            output.evlrs = list(las_in.evlrs)
+
+
         # Write
         out_name = os.path.basename(segmented_files[name])
         # Ensure .laz extension
