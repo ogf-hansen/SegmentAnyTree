@@ -5,9 +5,11 @@ set -e
 # Splits tiles into groups and runs multiple eval.py processes concurrently across GPUs.
 # Usage: run_parallel_inference.sh <input_dir> <output_dir> [clean_output_dir]
 # Environment variables:
-#   N_GPU_WORKERS  - total number of groups to split data into (default: 2)
-#   N_GPUS         - number of GPUs available (default: 1)
+#   N_GPU_WORKERS   - total number of groups to split data into (default: 2)
+#   N_GPUS          - number of GPUs available (default: 1)
 #   WORKERS_PER_GPU - max concurrent workers per GPU (default: 2)
+#   OMP_NUM_THREADS - OpenMP threads per eval.py process (default: 4); set higher for single-worker runs
+#   KNN_NUM_WORKERS - threads for KNN interpolation in tracker (default: 8)
 
 SOURCE_DIR="$1"
 DEST_DIR="$2"
@@ -17,6 +19,7 @@ N_GPU_WORKERS="${N_GPU_WORKERS:-2}"
 N_GPUS="${N_GPUS:-1}"
 WORKERS_PER_GPU="${WORKERS_PER_GPU:-2}"
 MAX_CONCURRENT=$((N_GPUS * WORKERS_PER_GPU))
+OMP_NUM_THREADS="${OMP_NUM_THREADS:-4}"
 
 # Set default values if not provided
 : "${SOURCE_DIR:=/home/nibio/mutable-outside-world/data_for_test}"
@@ -209,7 +212,7 @@ launch_group() {
     local final_dir="$DEST_DIR/final_results"
     (
         log "[Group $k] Starting inference on $fc files on GPU $gpu at $(date +%H:%M:%S)..."
-        CUDA_VISIBLE_DEVICES=$gpu python3 eval.py --config-name "$group_output/eval.yaml" \
+        OMP_NUM_THREADS="${OMP_NUM_THREADS:-4}" CUDA_VISIBLE_DEVICES=$gpu python3 eval.py --config-name "$group_output/eval.yaml" \
             > "$group_log" 2>&1
         log "[Group $k] Inference complete at $(date +%H:%M:%S)."
 
