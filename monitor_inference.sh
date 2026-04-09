@@ -37,8 +37,9 @@ DISK=$(df -h /home | awk 'NR==2{printf "Disk: %s / %s (%s)", $3, $2, $5}')
 echo "  $MEM"
 echo "  $DISK"
 
-# Completed groups
-mapfile -t DONE_LINES < <(grep "\] Inference complete" "$LOG_FILE")
+# Completed groups — only count as done when merge has finished,
+# or when inference produced no predictions (no merge needed)
+mapfile -t DONE_LINES < <(grep -E "\] Merge complete|\] No predictions produced" "$LOG_FILE")
 COMPLETED_COUNT=${#DONE_LINES[@]}
 
 # Identify main eval.py processes: parent is the shell script, not another python
@@ -59,7 +60,7 @@ done < <(ps -eo pid,ppid,%cpu,args | grep "eval.py --config-name" | grep -v grep
 RUNNING_COUNT=${#MAIN_PROCS[@]}
 
 echo ""
-echo "--- Progress: $COMPLETED_COUNT / $TOTAL_GROUPS groups complete ---"
+echo "--- Progress: $COMPLETED_COUNT / $TOTAL_GROUPS complete | $(grep -c "\] Starting merge" "$LOG_FILE" 2>/dev/null || echo 0) merging | $RUNNING_COUNT inferring ---"
 
 # Completed groups
 if [ "$COMPLETED_COUNT" -gt 0 ]; then
@@ -68,7 +69,34 @@ if [ "$COMPLETED_COUNT" -gt 0 ]; then
     for line in "${DONE_LINES[@]}"; do
         GRP=$(echo "$line" | grep -oP "Group \d+")
         TIME=$(echo "$line" | grep -oP "at \S+")
-        echo "  done  $GRP ($TIME)"
+        echo "  done  $GRP (merge $TIME)"
+    done
+fi
+
+# Merging groups: inference done, merge started but not yet complete
+MERGING_GROUPS=()
+for ((g=0; g<TOTAL_GROUPS; g++)); do
+    if grep -q "\[Group $g\] Starting merge" "$LOG_FILE" 2>/dev/null; then
+        if ! grep -qE "\[Group $g\] Merge complete|\[Group $g\] No predictions produced" "$LOG_FILE" 2>/dev/null; then
+            MERGE_START=$(grep "\[Group $g\] Starting merge" "$LOG_FILE" | grep -oP "at \S+" | tail -1)
+            LAS_COUNT=$(ls "$DEST_DIR/final_results/"*.las "$DEST_DIR/final_results/"*.laz 2>/dev/null | wc -l)
+            MERGING_GROUPS+=("$g|$MERGE_START")
+        fi
+    fi
+done
+
+if [ ${#MERGING_GROUPS[@]} -gt 0 ]; then
+    echo ""
+    echo "Merging (${#MERGING_GROUPS[@]}):"
+    for entry in "${MERGING_GROUPS[@]}"; do
+        IFS='|' read -r GRP_NUM MERGE_START <<< "$entry"
+        NPZ_COUNT=$(ls "$DEST_DIR/group_${GRP_NUM}"/predictions_*.npz 2>/dev/null | wc -l)
+        TILES_TOTAL=$(ls "$DEST_DIR/group_${GRP_NUM}_input"/*.ply 2>/dev/null | wc -l)
+        MERGE_PROC=""
+        if pgrep -f "merge_predictions.py.*group_${GRP_NUM}" > /dev/null 2>&1; then
+            MERGE_PROC="  [merge running]"
+        fi
+        echo "  merge  Group $GRP_NUM  (started $MERGE_START  npz:$NPZ_COUNT/$TILES_TOTAL)$MERGE_PROC"
     done
 fi
 
